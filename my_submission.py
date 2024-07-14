@@ -74,25 +74,24 @@ def main():
         
         # Send the move to the engine.
         game.send_move(choose_move(query))
-                
+    
 def handle_claim_territory(game: Game, bot_state: BotState, query: QueryClaimTerritory) -> MoveClaimTerritory:
     """At the start of the game, you can claim a single unclaimed territory every turn 
     until all the territories have been claimed by players."""
-
+    
+    # General information used
     unclaimed_territories = game.state.get_territories_owned_by(None)
     my_territories = game.state.get_territories_owned_by(game.state.me.player_id)
     all_territories = [territory for territory in game.state.territories]
     enemy_territories = list((set(all_territories) - set(unclaimed_territories)) - set(my_territories))
     adjacent_territories = game.state.get_all_adjacent_territories(my_territories)
     continents = game.state.map.get_continents()
-    # We will try to always pick new territories that are next to ones that we own,
-    # or a random one if that isn't possible.
 
-    # gives number of friendly territories adjacent 
+    # Gives number of friendly territories adjacent 
     def count_adjacent_friendly(territory: int) -> int:
         return len(set(my_territories) & set(game.state.map.get_adjacent_to(territory)))
     
-    # gives number of friendly territories in that continent
+    # Gives the proportion of a continent owned by you that the territory is from
     def proportion_continent_of_territory(territory: int) -> float:
         for continent in continents:
             if territory in continents[continent]:
@@ -100,7 +99,7 @@ def handle_claim_territory(game: Game, bot_state: BotState, query: QueryClaimTer
         else:
             return 0
 
-    # returns 1 or 0 whether the territory will break an enemy continent
+    # Returns 1 or 0 whether the territory will break an enemy continent
     def almost_completed_enemy_continent(territory: int) -> int:
         for continent in continents:
             if territory in continents[continent]:
@@ -110,13 +109,13 @@ def handle_claim_territory(game: Game, bot_state: BotState, query: QueryClaimTer
         else:
             return 0
         
-    # gives the number of enemy territories in that continent
+    # Gives the proportion of a continent owned by enemies that the territory is from
     def proportion_of_enemy_competing_continent(territory: int) -> float:
         for continent in continents:
             if territory in continents[continent]:
                 return len((set(continents[continent]) - (set(my_territories))) - set(unclaimed_territories))/len(continents[continent]) 
 
-    # gives from 0 to 3 based on how close the nearest enemy territory is, 3 being highest        
+    # Gives from 0 to 3 based on how close the nearest enemy territory is, 3 being highest        
     def aggresively_guarding(territory: int) -> float:
         edges_to_enemy = 0
         if territory in adjacent_territories:
@@ -133,6 +132,7 @@ def handle_claim_territory(game: Game, bot_state: BotState, query: QueryClaimTer
         else:
             return 0
     
+    # Favouring specific continents
     def favourable_continent(territory: int) -> float:
         continent_weightings = [0.7, 0.5, 0.5, 0.8, 0.8, 0.7]
         for continent in continents:
@@ -140,31 +140,26 @@ def handle_claim_territory(game: Game, bot_state: BotState, query: QueryClaimTer
                 return continent_weightings[continent]
         return 0
 
+    # Claiming territories that are sealed so that enemies do not take it 
     def enclose(territory: int) -> int:
         if (set(game.state.map.get_adjacent_to(territory)) & set(my_territories)) == set(game.state.map.get_adjacent_to(territory)):
             return 1
         else: 
             return 0
-
-    currently_competing_continents = []
-    for key in continents:
-        if(len(set(continents[key]) & set(my_territories)) != 0):
-            currently_competing_continents.append(key)
-
-    adjacent_same_continent_territories = []
-    for continent in currently_competing_continents:
-        adjacent_same_continent_territories.extend(list(set(continents[continent]) & set(adjacent_territories)))
         
+    # For weightings
     territory_weights = defaultdict(lambda: 0.0)
 
-    adjacent = 1
+    # Coefficients for weightings
+    adjacent = 2
     same_continent = 6
-    swap_continent = 0.1
+    swap_continent = 0.01
     break_continent = 2
     guarding = 0.6
     enclose_territory = 5
     favouring = 1
 
+    # Calculating each territory weight
     for territory in unclaimed_territories:
         territory_weights[territory] = \
             adjacent*count_adjacent_friendly(territory)*len(my_territories) \
@@ -174,8 +169,8 @@ def handle_claim_territory(game: Game, bot_state: BotState, query: QueryClaimTer
             + break_continent*almost_completed_enemy_continent(territory) \
             + guarding*aggresively_guarding(territory)*proportion_continent_of_territory(territory)*(9 - len(my_territories)) \
             + enclose_territory*enclose(territory)
-        # territory weight =  number of friendly territories adjacent + number of friendly territories in that continent + number of enemy territories in that continent + returns 1 or 0 whether the territory will break an enemy continent + aggressively guarding
 
+    # Sorting and selecting the territories
     territory_weights = sorted(territory_weights, key=lambda x: territory_weights[x], reverse=True)
     selected_territory = list(territory_weights)[0]
 
@@ -185,6 +180,7 @@ def handle_place_initial_troop(game: Game, bot_state: BotState, query: QueryPlac
     """After all the territories have been claimed, you can place a single troop on one
     of your territories each turn until each player runs out of troops."""
     
+    # General information
     unclaimed_territories = game.state.get_territories_owned_by(None)
     my_territories = game.state.get_territories_owned_by(game.state.me.player_id)
     all_territories = [territory for territory in game.state.territories]
@@ -192,28 +188,31 @@ def handle_place_initial_troop(game: Game, bot_state: BotState, query: QueryPlac
     continents = game.state.map.get_continents()
     border_territories = game.state.get_all_border_territories(my_territories)
 
-    # gives number of friendly territories in that continent
+    # Gives the proportion of a continent owned by you that the territory is from
     def proportion_continent_of_territory(territory: int) -> float:
         for continent in continents:
             if territory in continents[continent]:
                 return len(set(my_territories) & set(continents[continent]))/len(continents[continent])
         else:
             return 0
-        
+    
+    # Ratio of enemies near the territory to the number of friendly troops near those enemies
     def difference_number_enemy(territory: int) -> float:
         adjacent_enemies = list(set(game.state.map.get_adjacent_to(territory)) & set(enemy_territories))
         adjacent_friendlies = list(set(my_territories) & set(game.state.get_all_adjacent_territories(adjacent_enemies)))
-        friendlies = 1
+        friendlies = 0.1
         for friendly in adjacent_friendlies:
             friendlies += game.state.territories[friendly].troops - 1
-        adjacent_enemy_troops = 0
+        adjacent_enemy_troops = 1
         for adjacent_enemy in adjacent_enemies:
             adjacent_enemy_troops += game.state.territories[adjacent_enemy].troops - 1
         return adjacent_enemy_troops/friendlies
     
+    # Returns the number of adjacent friendly territories
     def count_adjacent_friendly(territory: int) -> int:
         return len(set(my_territories) & set(game.state.map.get_adjacent_to(territory)))
 
+    # This measures how many connected territories there would be with this territory claimed
     def favour_territory_groups(territory: int) -> int:
         if len(set(my_territories) & set(game.state.map.get_adjacent_to(territory))) > 0:
             blob_territories = []
@@ -225,19 +224,22 @@ def handle_place_initial_troop(game: Game, bot_state: BotState, query: QueryPlac
         else:
             return 0
 
+    # For weightings
     territory_weights = defaultdict(lambda: 0.0)
+    # Coefficients for weightings
     same_continent = 9
     enemies_close = 1
     adjacency = 1
     blobiness = 1
 
+    # Calculating the weight for each border territory
     for territory in border_territories:
         territory_weights[territory] = same_continent*proportion_continent_of_territory(territory) \
             + enemies_close*difference_number_enemy(territory) \
             + adjacency*count_adjacent_friendly(territory)**0.5 \
             + blobiness*favour_territory_groups(territory)
-        # territory weight = number of friendly territories owned in continent + difference between the number on territory and number of enemies adjacent to the territory + if it is adjacent to another territory that completes a nearly completed continent 
 
+    # Sorting and selecting the territories
     territory_weights = sorted(territory_weights, key=lambda x: territory_weights[x], reverse=True)
     selected_territory = list(territory_weights)[0]
 
@@ -248,8 +250,8 @@ def handle_redeem_cards(game: Game, bot_state: BotState, query: QueryRedeemCards
     """After the claiming and placing initial troops phases are over, you can redeem any
     cards you have at the start of each turn, or after killing another player."""
 
-    # We will always redeem the minimum number of card sets we can until the 12th card set has been redeemed.
-    # This is just an arbitrary choice to try and save our cards for the late game.
+    # We will always redeem the minimum number of card sets we can until the 5th card set has been redeemed.
+    # This is just an arbitrary choice to try and save our cards for the mid game.
 
     # We always have to redeem enough cards to reduce our card count below five.
     card_sets: list[Tuple[CardModel, CardModel, CardModel]] = []
@@ -265,7 +267,7 @@ def handle_redeem_cards(game: Game, bot_state: BotState, query: QueryRedeemCards
 
     # Remember we can't redeem any more than the required number of card sets if 
     # we have just eliminated a player.
-    if game.state.card_sets_redeemed > 12 and query.cause == "turn_started":
+    if game.state.card_sets_redeemed > 5 and query.cause == "turn_started":
         card_set = game.state.get_card_set(cards_remaining)
         while card_set != None:
             card_sets.append(card_set)
@@ -280,6 +282,7 @@ def handle_distribute_troops(game: Game, bot_state: BotState, query: QueryDistri
     all the troops you have available across your territories. This can happen at the start of
     your turn or after killing another player.
     """
+    # General information
     unclaimed_territories = game.state.get_territories_owned_by(None)
     my_territories = game.state.get_territories_owned_by(game.state.me.player_id)
     all_territories = [territory for territory in game.state.territories]
@@ -287,22 +290,25 @@ def handle_distribute_troops(game: Game, bot_state: BotState, query: QueryDistri
     continents = game.state.map.get_continents()
     border_territories = game.state.get_all_border_territories(my_territories)
 
+    # Troop distribution setup
     total_troops = game.state.me.troops_remaining
     distributions = defaultdict(lambda: 0)
 
+    # Place troops from territory bonus
     if len(game.state.me.must_place_territory_bonus) != 0:
         assert total_troops >= 2
         distributions[game.state.me.must_place_territory_bonus[0]] += 2
         total_troops -= 2
 
-    # gives number of friendly territories in that continent
+    # Gives the proportion of a continent owned by you that the territory is from
     def proportion_continent_of_territory(territory: int) -> float:
         for continent in continents:
             if territory in continents[continent]:
                 return len(set(my_territories) & set(continents[continent]))/len(continents[continent])
         else:
             return 0
-        
+    
+    # Provides a ratio between nearby friendly and enemy troops except returns 0 when is deemed to difficult to defend
     def difference_number_enemy(territory: int) -> float:
         adjacent_enemies = list(set(game.state.map.get_adjacent_to(territory)) & set(enemy_territories))
         adjacent_friendlies = list(set(my_territories) & set(game.state.get_all_adjacent_territories(adjacent_enemies)))
@@ -316,11 +322,13 @@ def handle_distribute_troops(game: Game, bot_state: BotState, query: QueryDistri
             return 0
         return adjacent_enemy_troops/friendlies
     
+    # Returns the number of adjacent friendly territories
     def count_adjacent_friendly(territory: int) -> int:
         return len(set(my_territories) & set(game.state.map.get_adjacent_to(territory)))
 
+    # This measures how many connected territories there would be with this territory claimed
     def favour_territory_groups(territory: int) -> int:
-        if len(set(my_territories) & set(game.state.map.get_adjacent_to(territory))) > 0:
+        if len(list(set(my_territories) & set(game.state.map.get_adjacent_to(territory)))) > 0:
             blob_territories = []
             next_edge = list(set(my_territories) & set(game.state.map.get_adjacent_to(territory)))
             while len(next_edge) != 0:
@@ -330,28 +338,32 @@ def handle_distribute_troops(game: Game, bot_state: BotState, query: QueryDistri
         else:
             return 0
     
+    # Gives more weight to already large armies
+    def prioritise_large_army(territory: int) -> int:
+        return game.state.territories[territory].troops
+
+    # Coefficients for weightings
     territory_weights = defaultdict(lambda: 0.0)
     same_continent = 7
-    same_continent2 = 3
+    same_continent2 = 4
     adjacency = 1
-    blobiness = 0.5
+    blobiness = 2
+    troopiness = 0.1
 
+    # Calculating weights for each territory
     for territory in border_territories:
         territory_weights[territory] = same_continent*proportion_continent_of_territory(territory)*difference_number_enemy(territory) \
             + same_continent2*proportion_continent_of_territory(territory)\
             + adjacency*count_adjacent_friendly(territory)**0.5 \
             + blobiness*favour_territory_groups(territory)\
-            + 0.1
-        # territory weight = number of friendly territories owned in continent + difference between the number on territory and number of enemies adjacent to the territory + if it is adjacent to another territory that completes a nearly completed continent
+            + troopiness*prioritise_large_army(territory)
 
+    # Matching the weighting distribution to the troop distribution
     total_weight = sum([territory_weights[territory] for territory in territory_weights])
-
     leftover = total_troops
     for territory in border_territories:
- 
         distributions[territory] += math.floor((territory_weights[territory]/total_weight)*total_troops)
         leftover -= math.floor((territory_weights[territory]/total_weight)*total_troops)
-
     distributions[border_territories[0]] += leftover
 
     return game.move_distribute_troops(query, distributions)
@@ -361,6 +373,7 @@ def handle_attack(game: Game, bot_state: BotState, query: QueryAttack) -> Union[
     """After the troop phase of your turn, you may attack any number of times until you decide to
     stop attacking (by passing). After a successful attack, you may move troops into the conquered
     territory. If you eliminated a player you will get a move to redeem cards and then distribute troops."""
+    # General information
     all_territories = [territory for territory in game.state.territories]
     my_territories = game.state.get_territories_owned_by(game.state.me.player_id)
     unclaimed_territories = game.state.get_territories_owned_by(None)   
@@ -369,10 +382,12 @@ def handle_attack(game: Game, bot_state: BotState, query: QueryAttack) -> Union[
     bordering_territories = game.state.get_all_adjacent_territories(my_territories)
     continents = game.state.map.get_continents()
 
+    # Finding the troop count for each player
     all_troop_counts = defaultdict(lambda: 0)
     for territory in all_territories:
         all_troop_counts[game.state.territories[territory].occupier] += game.state.territories[territory].troops
 
+    # Finding which players have fewer troops that you and how many cards they have
     enemy_card_counts = defaultdict(lambda: 0)
     enemy_with_cards_lower_troops = []
     for player in all_troop_counts:
@@ -380,27 +395,30 @@ def handle_attack(game: Game, bot_state: BotState, query: QueryAttack) -> Union[
             enemy_card_counts[player] = game.state.players[player].card_count
             enemy_with_cards_lower_troops.append(player)
 
+    # Compares the number of enemy troops in the continent to the number of friendly troops bordering the territory
     def continent_strength(territory: int) -> float:
         strength = 0
         for continent in continents:
             if territory in continents[continent]:
-                for region in continents[continent]:
+                for region in list(set(continents[continent]) - set(my_territories)):
                     strength += game.state.territories[region].troops
         friendly_adjacent = list(set(game.state.map.get_adjacent_to(territory)) & set(my_territories))
         friendly_adjacent_troops = sum(game.state.territories[x].troops - 1 for x in friendly_adjacent)
         return friendly_adjacent_troops/strength
 
-
+    # Returns the number of adjacent friendly territories
     def adjacency(territory: int) -> int:
         return len(list(set(my_territories) & set(game.state.map.get_adjacent_to(territory))))
 
+    # Gives the proportion of a continent owned by you that the territory is from
     def proportion_continent_of_territory(territory: int) -> float:
         for continent in continents:
             if territory in continents[continent]:
                 return len(set(my_territories) & set(continents[continent]))/len(continents[continent])
         else:
             return 0
-        
+    
+    # Provides a ratio between nearby friendly and enemy troops
     def troop_comparison(territory: int) -> float:
         adjacent_enemies = list((set(game.state.map.get_adjacent_to(territory)) & set(enemy_territories)) | set([territory]))
         adjacent_friendlies = list((set(my_territories) & set(game.state.get_all_adjacent_territories(adjacent_enemies))))
@@ -412,24 +430,28 @@ def handle_attack(game: Game, bot_state: BotState, query: QueryAttack) -> Union[
             adjacent_enemy_troops += game.state.territories[adjacent_enemy].troops
         return friendlies/adjacent_enemy_troops
     
+    # Determines whether the territory is a choke point 
     def choke_point(territory: int) -> int:
         if territory in choke_points:
             return 1
         else:
             return 0
 
+    # Determines whether taking this territory would leave a choke point
     def hold_choke_point(territory: int) -> int:
         if (len((set(game.state.map.get_adjacent_to(territory)) & set(choke_points)) & set(my_territories)) > 0):
             return 1
         else:
             return 0   
 
+    # Gives a weighting for how many cards you could get by eliminating this opponent
     def get_cards(territory: int) -> int:
         if game.state.territories[territory].occupier in enemy_with_cards_lower_troops:
             return enemy_card_counts[game.state.territories[territory].occupier]
         else:
             return 0
-        
+    
+    # Finds how many vulnerable the attacking army would leave their territory if they took this territory
     def stay_put(territory: int) -> int:
         adjacent_friend = list(set(game.state.map.get_adjacent_to(territory)) & set(my_territories))
         other_enemies = list(set(game.state.get_all_adjacent_territories(adjacent_friend)) - set([territory]))
@@ -437,23 +459,26 @@ def handle_attack(game: Game, bot_state: BotState, query: QueryAttack) -> Union[
         other_enemy_troops = sum(game.state.territories[territory].troops for territory in other_enemies)
         return friend_troops - other_enemy_troops
 
+    # Finds how much the size of border territories would change by taking this territory
     def border_size_change(territory: int) -> int:
         return len(border_territories) - len(game.state.get_all_border_territories(list(set(my_territories) | set([territory]))))
 
+    # Coefficients for weightings
     choke_points = [40, 24, 29, 36, 30, 2, 4, 10, 0, 21]
     same_continent = 5
     chokehold = 1.5
-    staychoke = 1.5
-    cardwant = 1
+    staychoke = 0.5
+    cardwant = 2
     adjacencybonus = 0.1
     borderincrease = 0.5
     keep_border_safe = 0
     threshold = 2
-    weak_continent = 2
+    weak_continent = 3
+
     print('')
     print("This round is", game.state.new_records)
 
-    # finding weights for each territory
+    # Calculating weights for each bordering territory 
     territory_weights = defaultdict(lambda: 0.0)
     for territory in bordering_territories:
         territory_weights[territory] = \
@@ -470,30 +495,25 @@ def handle_attack(game: Game, bot_state: BotState, query: QueryAttack) -> Union[
         print(("getting cards", cardwant*get_cards(territory)*game.state.card_sets_redeemed), ("adjacency", adjacencybonus*adjacency(territory)))
         print(("border increases", borderincrease*border_size_change(territory)), ("keeping border safe", keep_border_safe*stay_put(territory)), ("going for weak continent", weak_continent*continent_strength(territory)))
         
-
-        # weight = number of territories in the continent +/- number of enemies compared to friendlies + choke points +/- when ahead of troop count and troop growth + amount of adjacency + optimal pathing - adjacent army is on a choke point + nearly eliminated*cardgain*troopgainmod
-
-    # blending the weights to sort of look ahead at options
+    # Sorting the territories
     territory_weights_order = sorted(territory_weights, key=lambda x: territory_weights[x], reverse=True)
 
+    # Firsly determining which territories have a weighting that reach the threshold
     for territory in territory_weights_order:
         if territory_weights[territory] > threshold:
-
+            # Using the attacker with the most troops
             attacking_canditates = sorted(list(set(game.state.map.get_adjacent_to(territory)) & set(my_territories)), key=lambda x: game.state.territories[x].troops, reverse=True)
             attacker = attacking_canditates[0]
-            
+            # Instead using an attacker that would otherwise be left in an internal territory
             for potential_attacker in attacking_canditates:
                 if (len(list(set(game.state.map.get_adjacent_to(potential_attacker)) - set(my_territories))) == 1) and (game.state.territories[potential_attacker].troops > 1):
                     attacker = potential_attacker
                     break
             
             if game.state.territories[attacker].troops > 1: 
-
-                # if the troops you have on that territory are enough to maintain sufficient border strength and take over.
                 print("from:", attacker, "to", territory, "with:", game.state.territories[attacker].troops, "against:", game.state.territories[territory].troops)
                 return game.move_attack(query, attacker, territory, min(3, game.state.territories[attacker].troops - 1))
         else:
-
             return game.move_attack_pass(query)   
 
     return game.move_attack_pass(query)
@@ -501,48 +521,61 @@ def handle_attack(game: Game, bot_state: BotState, query: QueryAttack) -> Union[
 
 def handle_troops_after_attack(game: Game, bot_state: BotState, query: QueryTroopsAfterAttack) -> MoveTroopsAfterAttack:
     """After conquering a territory in an attack, you must move troops to the new territory."""
-    
+    # General information
     unclaimed_territories = game.state.get_territories_owned_by(None)
     my_territories = game.state.get_territories_owned_by(game.state.me.player_id)
     all_territories = [territory for territory in game.state.territories]
     enemy_territories = list((set(all_territories) - set(unclaimed_territories)) - set(my_territories))
     record_attack = cast(RecordAttack, game.state.recording[query.record_attack_id])
     move_attack = cast(MoveAttack, game.state.recording[record_attack.move_attack_id])
+    continents = game.state.map.get_continents()
 
+    # Which territory is attacking and which is defending
     from_territory = move_attack.attacking_territory
     to_territory = move_attack.defending_territory
 
-    adjacent_enemies_from = list(set(game.state.map.get_adjacent_to(from_territory)) & set(enemy_territories))
-    adjacent_friendlies_from = list(set(game.state.map.get_adjacent_to(from_territory)) & set(my_territories))
-    
-    adjacent_enemies_to = list(set(game.state.map.get_adjacent_to(to_territory)) & set(enemy_territories))
-    adjacent_friendlies_to = list((set(game.state.map.get_adjacent_to(to_territory)) & set(my_territories)) - set([from_territory]))
+    # Finding the ratio of enemies and friendly troops for each territory and then finding the ratio between those ratios. 
+    # If the continent largely owned then the troops will be distributed defensively otherwise all troops will go forward                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                    
+    for continent in continents:
+        if (from_territory in continents[continent]) and (len(set(continents[continent]) & set(my_territories))/len(set(continents[continent])) > 0.75):
 
-    friendlies_from = 1
-    for friendly in adjacent_friendlies_from:
-        friendlies_from += game.state.territories[friendly].troops - 1
-    enemies_from = 1
-    for adjacent_enemy in adjacent_enemies_from:
-        enemies_from += game.state.territories[adjacent_enemy].troops
-    ratio_from = friendlies_from/enemies_from 
+            adjacent_enemies_from = list(set(game.state.map.get_adjacent_to(from_territory)) & set(enemy_territories))
+            adjacent_friendlies_from = list(set(game.state.map.get_adjacent_to(from_territory)) & set(my_territories) - set([to_territory]))
+            
+            adjacent_enemies_to = list(set(game.state.map.get_adjacent_to(to_territory)) & set(enemy_territories))
+            adjacent_friendlies_to = list((set(game.state.map.get_adjacent_to(to_territory)) & set(my_territories)) - set([from_territory]))
 
-    friendlies_to = 1
-    for friendly in adjacent_friendlies_to:
-        friendlies_to += game.state.territories[friendly].troops - 1
-    enemies_to = 1
-    for adjacent_enemy in adjacent_enemies_to:
-        enemies_to += game.state.territories[adjacent_enemy].troops
-    ratio_to = friendlies_to/enemies_to 
+            friendlies_from = 0.1
+            for friendly in adjacent_friendlies_from:
+                friendlies_from += game.state.territories[friendly].troops - 1
 
-    ratio = ratio_from/ratio_to
-    troops_available = game.state.territories[from_territory].troops - 1
-    sending_troops = round((troops_available/(ratio + 1)) * ratio)
-    #check if the territory attacked is connected to the rest of the world checking if there are 4 depth adjacent enemy territories in a path
-    # We will always move the maximum number of troops we can.
-    if sending_troops < 3:
-        return game.move_troops_after_attack(query, game.state.territories[from_territory].troops - 1)
-    return game.move_troops_after_attack(query, max(sending_troops, 3))
+            enemies_from = 0.1
+            for adjacent_enemy in adjacent_enemies_from:
+                enemies_from += game.state.territories[adjacent_enemy].troops
+            
+            ratio_from = friendlies_from/enemies_from 
 
+
+            friendlies_to = 0.1
+            for friendly in adjacent_friendlies_to:
+                friendlies_to += game.state.territories[friendly].troops - 1
+
+            enemies_to = 0.1
+            for adjacent_enemy in adjacent_enemies_to:
+                enemies_to += game.state.territories[adjacent_enemy].troops
+            
+            ratio_to = friendlies_to/enemies_to 
+
+            ratio = ratio_from/ratio_to
+            troops_available = game.state.territories[from_territory].troops
+            sending_troops = math.floor((troops_available/(ratio + 1)) * ratio)
+
+            # Need to ensure that the number of troops attacking go to the territory
+            if troops_available < 4:
+                return game.move_troops_after_attack(query, troops_available - 1)
+            return game.move_troops_after_attack(query, max(sending_troops, 3))
+        
+    return game.move_troops_after_attack(query, game.state.territories[from_territory].troops - 1)
 
 def handle_defend(game: Game, bot_state: BotState, query: QueryDefend) -> MoveDefend:
     """If you are being attacked by another player, you must choose how many troops to defend with."""
@@ -562,14 +595,17 @@ def handle_defend(game: Game, bot_state: BotState, query: QueryDefend) -> MoveDe
 def handle_fortify(game: Game, bot_state: BotState, query: QueryFortify) -> Union[MoveFortify, MoveFortifyPass]:
     """At the end of your turn, after you have finished attacking, you may move a number of troops between
     any two of your territories (they must be adjacent)."""
+    
+    # General information
     my_territories = game.state.get_territories_owned_by(game.state.me.player_id)
     border_territories = game.state.get_all_border_territories(my_territories)
-    # Otherwise we will find the shortest path between our territory with the most troops
-    # and any of the most powerful player's territories and fortify along that path.
+    
+    # Will always try to fortify an internal army to the border
     candidate_territories = list(set(my_territories) - set(border_territories))
     if len(candidate_territories) == 0:
         return game.move_fortify_pass(query)
     
+    # Finding the largest internal army
     max_troops = game.state.territories[candidate_territories[0]].troops
     max_territory = candidate_territories[0]
 
