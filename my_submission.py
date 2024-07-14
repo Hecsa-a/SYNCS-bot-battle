@@ -1,4 +1,5 @@
 from collections import defaultdict, deque
+import random
 from typing import Optional, Tuple, Union, cast
 from risk_helper.game import Game
 from risk_shared.models.card_model import CardModel
@@ -23,6 +24,7 @@ from risk_shared.records.moves.move_redeem_cards import MoveRedeemCards
 from risk_shared.records.moves.move_troops_after_attack import MoveTroopsAfterAttack
 from risk_shared.records.record_attack import RecordAttack
 from risk_shared.records.types.move_type import MoveType
+import time
 import math
 # We will store our enemy in the bot state.
 class BotState():
@@ -473,9 +475,6 @@ def handle_attack(game: Game, bot_state: BotState, query: QueryAttack) -> Union[
     threshold = 2.5
     weak_continent = 3.5
 
-    print('')
-    print("This round is", game.state.new_records)
-
     # Calculating weights for each bordering territory 
     territory_weights = defaultdict(lambda: 0.0)
     for territory in bordering_territories:
@@ -488,10 +487,6 @@ def handle_attack(game: Game, bot_state: BotState, query: QueryAttack) -> Union[
             + borderincrease*border_size_change(territory)\
             + keep_border_safe*stay_put(territory)\
             + weak_continent*continent_strength(territory)
-        print("total", territory, ":",territory_weights[territory])
-        print(("largely owned continent", same_continent*proportion_continent_of_territory(territory)*troop_comparison(territory)), ("going for chokepoint", chokehold*choke_point(territory)),("staying at chokepoint", - staychoke*hold_choke_point(territory)))
-        print(("getting cards", cardwant*get_cards(territory)*game.state.card_sets_redeemed), ("adjacency", adjacencybonus*adjacency(territory)))
-        print(("border increases", borderincrease*border_size_change(territory)), ("keeping border safe", keep_border_safe*stay_put(territory)), ("going for weak continent", weak_continent*continent_strength(territory)))
         
     # Sorting the territories
     territory_weights_order = sorted(territory_weights, key=lambda x: territory_weights[x], reverse=True)
@@ -509,7 +504,6 @@ def handle_attack(game: Game, bot_state: BotState, query: QueryAttack) -> Union[
                     break
             
             if game.state.territories[attacker].troops > 1: 
-                print("from:", attacker, "to", territory, "with:", game.state.territories[attacker].troops, "against:", game.state.territories[territory].troops)
                 return game.move_attack(query, attacker, territory, min(3, game.state.territories[attacker].troops - 1))
         else:
             return game.move_attack_pass(query)   
