@@ -1,5 +1,4 @@
 from collections import defaultdict, deque
-import random
 from typing import Optional, Tuple, Union, cast
 from risk_helper.game import Game
 from risk_shared.models.card_model import CardModel
@@ -24,7 +23,6 @@ from risk_shared.records.moves.move_redeem_cards import MoveRedeemCards
 from risk_shared.records.moves.move_troops_after_attack import MoveTroopsAfterAttack
 from risk_shared.records.record_attack import RecordAttack
 from risk_shared.records.types.move_type import MoveType
-import time
 import math
 # We will store our enemy in the bot state.
 class BotState():
@@ -153,7 +151,7 @@ def handle_claim_territory(game: Game, bot_state: BotState, query: QueryClaimTer
     # Coefficients for weightings
     adjacent = 2
     same_continent = 6
-    swap_continent = 0.01
+    swap_continent = 0.05
     break_continent = 2
     guarding = 0.6
     enclose_territory = 5
@@ -465,15 +463,15 @@ def handle_attack(game: Game, bot_state: BotState, query: QueryAttack) -> Union[
 
     # Coefficients for weightings
     choke_points = [40, 24, 29, 36, 30, 2, 4, 10, 0, 21]
-    same_continent = 5
+    same_continent = 4
     chokehold = 1.5
     staychoke = 0.5
     cardwant = 2
     adjacencybonus = 0.1
     borderincrease = 0.5
     keep_border_safe = 0
-    threshold = 2
-    weak_continent = 3
+    threshold = 2.5
+    weak_continent = 3.5
 
     print('')
     print("This round is", game.state.new_records)
@@ -537,7 +535,7 @@ def handle_troops_after_attack(game: Game, bot_state: BotState, query: QueryTroo
     # Finding the ratio of enemies and friendly troops for each territory and then finding the ratio between those ratios. 
     # If the continent largely owned then the troops will be distributed defensively otherwise all troops will go forward                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                    
     for continent in continents:
-        if (from_territory in continents[continent]) and (len(set(continents[continent]) & set(my_territories))/len(set(continents[continent])) > 0.75):
+        if (from_territory in continents[continent]) and (len(set(continents[continent]) & set(my_territories))/len(set(continents[continent])) > 0.5):
 
             adjacent_enemies_from = list(set(game.state.map.get_adjacent_to(from_territory)) & set(enemy_territories))
             adjacent_friendlies_from = list(set(game.state.map.get_adjacent_to(from_territory)) & set(my_territories) - set([to_territory]))
